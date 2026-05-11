@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+body {
+  background: #0f0f11;
+  color: #e8e6df;
+  font-family: Georgia, serif;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #18181c; }
+::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 3px; }
+
+/* Drop zone animation */
+@keyframes pulse-border {
+  0%, 100% { border-color: #c9a96e44; }
+  50% { border-color: #c9a96e99; }
+}
+.drop-active { animation: pulse-border 1.2s ease-in-out infinite; }
+
+/* Progress bar shimmer */
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to { background-position: 200% center; }
+}
+.progress-bar {
+  background: linear-gradient(90deg, #9a7a48 0%, #e0c898 50%, #9a7a48 100%);
+  background-size: 200% auto;
+  animation: shimmer 1.8s linear infinite;
+}
