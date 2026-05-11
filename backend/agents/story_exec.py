@@ -1,100 +1,61 @@
-"""Story Execution Agent.
-
-Ranks story ideas by impact and audience fit, then writes full narrative text
-for the top stories. Returns RankedStory objects.
-"""
+"""Story Execution Agent — uses Gemini."""
 from __future__ import annotations
 import json
-from openai import AsyncOpenAI
-from core.schemas import AudienceMode, ChartSpec, RankedStory, StoryIdea
+import google.generativeai as genai
+from core.schemas import AudienceMode, RankedStory, StoryIdea
 from core.config import get_settings
 
-_RANK_SYSTEM = """You are an editorial director. Rank the following data story ideas 
-by business impact and actionability.
-
-Return ONLY valid JSON — the same list with an added 'score' key (0.0-1.0) for each item,
-sorted descending by score. No other changes."""
+_RANK_SYSTEM = """You are an editorial director. Rank these data story ideas by business impact and actionability.
+Return ONLY a JSON array — same items with an added 'score' key (0.0-1.0), sorted descending by score."""
 
 _EXPAND_SYSTEM = """You are a senior business analyst writing an executive-ready data story.
-
 Write a compelling narrative (200-300 words) that:
-1. Opens with the hook to grab attention
-2. Establishes context with relevant data points
-3. Reveals the surprising dispute/finding with specific numbers
-4. Closes with a concrete, actionable solution
-5. Adapts tone to the audience: 
-   - executive: high-level, outcomes-focused, minimal jargon
-   - analyst: detailed, methodology-aware, data-rich
-   - investor: ROI-focused, risk-aware, growth-oriented
-   - general: plain language, relatable analogies
-
-Return ONLY the narrative text. No titles, no JSON."""
+1. Opens with the hook
+2. Establishes context with data points
+3. Reveals the surprising finding with specific numbers
+4. Closes with a concrete actionable solution
+5. Adapts tone: executive=outcomes-focused, analyst=data-rich, investor=ROI-focused, general=plain language
+Return ONLY the narrative text."""
 
 
-async def _rank_stories(
-    ideas: list[StoryIdea], client: AsyncOpenAI, model: str
-) -> list[tuple[StoryIdea, float]]:
+def _rank_stories(ideas: list[StoryIdea], model) -> list[tuple[StoryIdea, float]]:
     payload = [i.model_dump() for i in ideas]
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _RANK_SYSTEM},
-            {"role": "user", "content": json.dumps(payload)},
-        ],
-        max_tokens=800,
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-    raw = json.loads(response.choices[0].message.content)
+    prompt = f"{_RANK_SYSTEM}\n\n{json.dumps(payload)}"
+    response = model.generate_content(prompt)
+    raw = json.loads(response.text.strip())
     if isinstance(raw, dict):
         raw = next(iter(raw.values()))
-    return [(StoryIdea(**{k: v for k, v in item.items() if k != "score"}),
-             float(item.get("score", 0.5))) for item in raw]
+    return [
+        (StoryIdea(**{k: v for k, v in item.items() if k != "score"}), float(item.get("score", 0.5)))
+        for item in raw
+    ]
 
 
-async def _expand_story(
-    idea: StoryIdea, audience: AudienceMode,
-    client: AsyncOpenAI, model: str
-) -> str:
-    user_prompt = (
-        f"Audience: {audience}\n"
-        f"Title: {idea.title}\n"
-        f"Hook: {idea.hook}\n"
-        f"Context: {idea.context}\n"
-        f"Dispute: {idea.dispute}\n"
-        f"Solution: {idea.solution}\n"
+def _expand_story(idea: StoryIdea, audience: AudienceMode, model) -> str:
+    prompt = (
+        f"{_EXPAND_SYSTEM}\n\n"
+        f"Audience: {audience}\nTitle: {idea.title}\nHook: {idea.hook}\n"
+        f"Context: {idea.context}\nDispute: {idea.dispute}\nSolution: {idea.solution}\n"
         "Write the narrative now."
     )
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _EXPAND_SYSTEM},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_tokens=600,
-        temperature=0.6,
-    )
-    return response.choices[0].message.content.strip()
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
 
-async def run(
-    ideas: list[StoryIdea],
-    audience: AudienceMode = "executive",
-    top_n: int = 3,
-) -> list[RankedStory]:
+async def run(ideas: list[StoryIdea], audience: AudienceMode = "executive", top_n: int = 3) -> list[RankedStory]:
     settings = get_settings()
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    genai.configure(api_key=settings.gemini_api_key)
+    model = genai.GenerativeModel(
+        settings.gemini_model,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    text_model = genai.GenerativeModel(settings.gemini_model)
 
-    ranked = await _rank_stories(ideas, client, settings.openai_model)
+    ranked = _rank_stories(ideas, model)
     ranked.sort(key=lambda x: x[1], reverse=True)
 
     results = []
     for idea, score in ranked[:top_n]:
-        narrative = await _expand_story(idea, audience, client, settings.openai_model)
-        results.append(RankedStory(
-            **idea.model_dump(),
-            score=score,
-            audience_mode=audience,
-            narrative_text=narrative,
-        ))
+        narrative = _expand_story(idea, audience, text_model)
+        results.append(RankedStory(**idea.model_dump(), score=score, audience_mode=audience, narrative_text=narrative))
     return results

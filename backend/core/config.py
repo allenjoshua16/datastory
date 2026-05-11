@@ -3,8 +3,8 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
     cors_origins: str = "http://localhost:5173"
     max_file_size_mb: int = 50
     upload_dir: str = "./uploads"
