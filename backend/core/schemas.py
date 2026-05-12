@@ -50,6 +50,7 @@ class ChartSpec(BaseModel):
     y_column: str | None = None
     color_column: str | None = None
     rationale: str
+    available_columns: list[str] = Field(default_factory=list)
     plotly_code: str = ""   # filled by Code Generation Agent
     rendered_html: str = "" # filled by Code Execution Agent
 

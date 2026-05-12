@@ -4,30 +4,37 @@ from core.schemas import ChartSpec
 from core.llm import chat
 
 _PROMPT = """You are an expert Python data visualization developer.
-Generate a complete executable Python script using Plotly that:
-1. Reads data from variable `filepath` (already defined as a string path)
-2. Loads it with pandas: use pd.read_csv(filepath) for CSV or pd.read_excel(filepath) for Excel
-3. Creates the specified chart using plotly.express
-4. Saves HTML to `output_path` using: fig.write_html(output_path, include_plotlyjs='cdn')
-5. Handles missing values with dropna() before plotting
-6. Uses only the exact column names provided — do not invent column names
+Generate a complete executable Python script using Plotly Express that:
+1. Reads data from variable `filepath` (already defined)
+2. Auto-detects file type: use pd.read_excel(filepath) if filepath ends with .xlsx or .xls, else pd.read_csv(filepath)
+3. Creates the specified chart
+4. Saves to `output_path` with: fig.write_html(output_path, include_plotlyjs='cdn')
+5. Uses ONLY the exact column names listed below
+6. Calls dropna(subset=[used_columns]) before plotting
 7. Does NOT call fig.show()
-8. Wraps everything in a try/except and prints errors
+8. Has a try/except that prints the full traceback on error
 
-Return ONLY Python code, no markdown fences, no explanation.
+EXACT column names available in the dataset:
+{available_columns}
 
-Chart type: {chart_type}
-Title: {title}
-X column: {x_column}
-Y column: {y_column}
-Color column: {color_column}
-Rationale: {rationale}
-{error_section}"""
+Chart to build:
+- Type: {chart_type}
+- Title: {title}
+- X axis: {x_column}
+- Y axis: {y_column}
+- Color by: {color_column}
+- Purpose: {rationale}
+
+{error_section}
+Return ONLY Python code. No markdown, no backticks, no explanation."""
 
 
 async def run(spec: ChartSpec, error: str | None = None) -> str:
-    error_section = f"\nPrevious attempt failed with this error — fix it:\n{error}" if error else ""
+    available = spec.available_columns if hasattr(spec, 'available_columns') and spec.available_columns else "unknown - use x_column and y_column as provided"
+    error_section = f"PREVIOUS ERROR (fix this):\n{error}" if error else ""
+
     prompt = _PROMPT.format(
+        available_columns=available,
         chart_type=spec.chart_type,
         title=spec.title,
         x_column=spec.x_column or "None",
@@ -37,7 +44,6 @@ async def run(spec: ChartSpec, error: str | None = None) -> str:
         error_section=error_section,
     )
     code = chat(prompt, json_mode=False)
-    # Strip markdown fences
     lines = code.strip().split("\n")
     if lines[0].startswith("```"):
         lines = lines[1:]
