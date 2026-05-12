@@ -6,14 +6,14 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
-    # Groq (alternative)
+    # Groq
     groq_api_key: str = ""
-    groq_model: str = "llama3-70b-8192"
-    # Which provider to use: "gemini" or "groq"
+    groq_model: str = "llama-3.3-70b-versatile"
+    # Provider: "gemini" or "groq"
     ai_provider: str = "groq"
 
     cors_origins: str = "http://localhost:5173"
-    max_file_size_mb: int = 50
+    max_file_size_mb: int = 200          # ← bumped to 200 MB
     upload_dir: str = "./uploads"
     log_level: str = "info"
 
