@@ -1,9 +1,8 @@
-"""Data Analysis Agent — uses Gemini."""
+"""Data Analysis Agent."""
 from __future__ import annotations
 import pandas as pd
-import google.generativeai as genai
 from core.schemas import ColumnStat, DatasetMetadata
-from core.config import get_settings
+from core.llm import chat
 
 
 def _load_dataframe(filepath: str) -> pd.DataFrame:
@@ -60,16 +59,11 @@ def _detect_anomalies(df: pd.DataFrame) -> list[str]:
 
 
 async def run(filepath: str) -> DatasetMetadata:
-    settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(settings.gemini_model)
-
     df = _load_dataframe(filepath)
     df_sample = df.head(5000)
-
-    columns     = _compute_column_stats(df_sample)
+    columns      = _compute_column_stats(df_sample)
     correlations = _compute_correlations(df_sample)
-    anomalies   = _detect_anomalies(df_sample)
+    anomalies    = _detect_anomalies(df_sample)
 
     col_names = [c.name for c in columns][:20]
     prompt = (
@@ -78,8 +72,7 @@ async def run(filepath: str) -> DatasetMetadata:
         "Examples: sales, finance, healthcare, marketing, logistics, hr, ecommerce. "
         "Reply with only the domain word, nothing else."
     )
-    response = model.generate_content(prompt)
-    domain = response.text.strip().lower().split()[0]
+    domain = chat(prompt).strip().lower().split()[0]
 
     return DatasetMetadata(
         row_count=len(df), column_count=len(df.columns),

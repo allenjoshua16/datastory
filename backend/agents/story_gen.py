@@ -1,53 +1,40 @@
-"""Story Generation Agent — uses Gemini."""
+"""Story Generation Agent."""
 from __future__ import annotations
 import json
-import google.generativeai as genai
 from core.schemas import ChartSpec, DatasetMetadata, StoryIdea
-from core.config import get_settings
+from core.llm import chat, _clean_json
 
-_SYSTEM = """You are a data storytelling expert who writes compelling business narratives.
+_PROMPT = """You are a data storytelling expert. Generate 3 story ideas using rhetorical structure theory.
 
-Given dataset analysis and visualization specs, generate 3 story ideas using
-rhetorical structure theory:
-- context: what's the background situation
-- dispute: the surprising or counter-intuitive finding
-- solution: the concrete recommendation
-
-Return ONLY a JSON array of objects with these keys:
+Return ONLY a valid JSON array of objects with these keys:
 - title: punchy story title (max 8 words)
-- hook: one-sentence grabber that creates curiosity
+- hook: one-sentence grabber
 - context: 1-2 sentences of background
 - dispute: 1-2 sentences on the unexpected finding
-- solution: 1-2 sentences with an actionable recommendation
-- relevant_chart_ids: list of chart_ids from the provided specs"""
+- solution: 1-2 sentences with actionable recommendation
+- relevant_chart_ids: list of chart_ids from provided specs
 
+No markdown. Only the JSON array.
 
-def _build_prompt(meta: DatasetMetadata, charts: list[ChartSpec]) -> str:
-    chart_summary = [{"chart_id": c.chart_id, "title": c.title, "rationale": c.rationale} for c in charts]
-    anomaly_text = "\n".join(meta.anomalies) if meta.anomalies else "None detected"
-    numeric_cols = [c for c in meta.columns if c.mean is not None]
-    stats_summary = [{"col": c.name, "mean": c.mean, "min": c.min, "max": c.max} for c in numeric_cols[:8]]
-    return (
-        f"{_SYSTEM}\n\n"
-        f"Domain: {meta.inferred_domain}, {meta.row_count} rows\n"
-        f"Key stats: {json.dumps(stats_summary)}\n"
-        f"Anomalies: {anomaly_text}\n"
-        f"Available charts: {json.dumps(chart_summary)}\n"
-        "Generate 3 story ideas. Return only a JSON array."
-    )
+Domain: {domain}, {rows} rows
+Key stats: {stats}
+Anomalies: {anomalies}
+Available charts: {charts}"""
 
 
 async def run(meta: DatasetMetadata, charts: list[ChartSpec]) -> list[StoryIdea]:
-    settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(
-        settings.gemini_model,
-        generation_config={"response_mime_type": "application/json"}
-    )
+    chart_summary = [{"chart_id": c.chart_id, "title": c.title, "rationale": c.rationale} for c in charts]
+    numeric_cols = [c for c in meta.columns if c.mean is not None]
+    stats_summary = [{"col": c.name, "mean": c.mean, "min": c.min, "max": c.max} for c in numeric_cols[:8]]
+    anomaly_text = "; ".join(meta.anomalies) if meta.anomalies else "None"
 
-    response = model.generate_content(_build_prompt(meta, charts))
-    parsed = json.loads(response.text.strip())
+    prompt = _PROMPT.format(
+        domain=meta.inferred_domain, rows=meta.row_count,
+        stats=json.dumps(stats_summary), anomalies=anomaly_text,
+        charts=json.dumps(chart_summary)
+    )
+    raw = chat(prompt, json_mode=True)
+    parsed = json.loads(_clean_json(raw))
     if isinstance(parsed, dict):
         parsed = next(iter(parsed.values()))
-
     return [StoryIdea(**item) for item in parsed]

@@ -1,50 +1,40 @@
-"""Visualization Generation Agent — uses Gemini."""
+"""Visualization Generation Agent."""
 from __future__ import annotations
 import json, uuid
-import google.generativeai as genai
 from core.schemas import ChartSpec, DatasetMetadata
-from core.config import get_settings
+from core.llm import chat, _clean_json
 
-_SYSTEM = """You are a data visualization expert. Given dataset metadata,
-recommend 3-5 meaningful, distinct chart specifications.
+_PROMPT = """You are a data visualization expert. Given dataset metadata,
+recommend 3-5 meaningful chart specifications.
 
-Return ONLY valid JSON — a list of objects with these exact keys:
-- chart_type: one of bar|line|scatter|pie|histogram|heatmap|box|area|funnel|treemap
+Return ONLY a valid JSON array of objects with these exact keys:
+- chart_type: one of bar|line|scatter|pie|histogram|heatmap|box|area
 - title: concise chart title
 - x_column: column name for x-axis (or null)
 - y_column: column name for y-axis (or null)
 - color_column: column for color grouping (or null)
-- rationale: one sentence explaining the insight this chart reveals
+- rationale: one sentence explaining the insight
 
-No markdown, no explanation outside the JSON array."""
+No markdown, no explanation. Only the JSON array.
+
+Dataset info:
+Domain: {domain}
+Rows: {rows}, Columns: {cols}
+Column details: {columns}
+Anomalies: {anomalies}"""
 
 
-def _build_prompt(meta: DatasetMetadata) -> str:
+async def run(meta: DatasetMetadata) -> list[ChartSpec]:
     col_summary = [
         {"name": c.name, "dtype": c.dtype, "unique": c.unique_count, "sample": c.sample_values[:3]}
         for c in meta.columns
     ]
-    return (
-        f"{_SYSTEM}\n\n"
-        f"Domain: {meta.inferred_domain}\n"
-        f"Rows: {meta.row_count}, Columns: {meta.column_count}\n"
-        f"Columns: {json.dumps(col_summary)}\n"
-        f"Anomalies: {meta.anomalies}\n"
-        "Recommend 3-5 charts. Return only a JSON array."
+    prompt = _PROMPT.format(
+        domain=meta.inferred_domain, rows=meta.row_count, cols=meta.column_count,
+        columns=json.dumps(col_summary), anomalies=meta.anomalies
     )
-
-
-async def run(meta: DatasetMetadata) -> list[ChartSpec]:
-    settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(
-        settings.gemini_model,
-        generation_config={"response_mime_type": "application/json"}
-    )
-
-    response = model.generate_content(_build_prompt(meta))
-    raw = response.text.strip()
-    parsed = json.loads(raw)
+    raw = chat(prompt, json_mode=True)
+    parsed = json.loads(_clean_json(raw))
     if isinstance(parsed, dict):
         parsed = next(iter(parsed.values()))
 

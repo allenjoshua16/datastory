@@ -1,61 +1,46 @@
-"""Story Execution Agent — uses Gemini."""
+"""Story Execution Agent."""
 from __future__ import annotations
 import json
-import google.generativeai as genai
 from core.schemas import AudienceMode, RankedStory, StoryIdea
-from core.config import get_settings
+from core.llm import chat, _clean_json
 
-_RANK_SYSTEM = """You are an editorial director. Rank these data story ideas by business impact and actionability.
-Return ONLY a JSON array — same items with an added 'score' key (0.0-1.0), sorted descending by score."""
+_RANK_PROMPT = """Rank these data story ideas by business impact and actionability.
+Return ONLY a JSON array — same items with an added 'score' key (0.0-1.0), sorted descending.
+No markdown. Only the JSON array.
 
-_EXPAND_SYSTEM = """You are a senior business analyst writing an executive-ready data story.
-Write a compelling narrative (200-300 words) that:
-1. Opens with the hook
-2. Establishes context with data points
-3. Reveals the surprising finding with specific numbers
-4. Closes with a concrete actionable solution
-5. Adapts tone: executive=outcomes-focused, analyst=data-rich, investor=ROI-focused, general=plain language
-Return ONLY the narrative text."""
+{ideas}"""
 
+_EXPAND_PROMPT = """Write a compelling data narrative (200-300 words) for a {audience} audience.
+Open with the hook, establish context with data, reveal the finding, close with action.
+Tone: executive=outcomes-focused, analyst=data-rich, investor=ROI-focused, general=plain language.
+Return ONLY the narrative text, no titles or labels.
 
-def _rank_stories(ideas: list[StoryIdea], model) -> list[tuple[StoryIdea, float]]:
-    payload = [i.model_dump() for i in ideas]
-    prompt = f"{_RANK_SYSTEM}\n\n{json.dumps(payload)}"
-    response = model.generate_content(prompt)
-    raw = json.loads(response.text.strip())
-    if isinstance(raw, dict):
-        raw = next(iter(raw.values()))
-    return [
-        (StoryIdea(**{k: v for k, v in item.items() if k != "score"}), float(item.get("score", 0.5)))
-        for item in raw
-    ]
-
-
-def _expand_story(idea: StoryIdea, audience: AudienceMode, model) -> str:
-    prompt = (
-        f"{_EXPAND_SYSTEM}\n\n"
-        f"Audience: {audience}\nTitle: {idea.title}\nHook: {idea.hook}\n"
-        f"Context: {idea.context}\nDispute: {idea.dispute}\nSolution: {idea.solution}\n"
-        "Write the narrative now."
-    )
-    response = model.generate_content(prompt)
-    return response.text.strip()
+Title: {title}
+Hook: {hook}
+Context: {context}
+Finding: {dispute}
+Solution: {solution}"""
 
 
 async def run(ideas: list[StoryIdea], audience: AudienceMode = "executive", top_n: int = 3) -> list[RankedStory]:
-    settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(
-        settings.gemini_model,
-        generation_config={"response_mime_type": "application/json"}
-    )
-    text_model = genai.GenerativeModel(settings.gemini_model)
+    # Rank
+    rank_prompt = _RANK_PROMPT.format(ideas=json.dumps([i.model_dump() for i in ideas]))
+    raw = chat(rank_prompt, json_mode=True)
+    ranked_raw = json.loads(_clean_json(raw))
+    if isinstance(ranked_raw, dict):
+        ranked_raw = next(iter(ranked_raw.values()))
 
-    ranked = _rank_stories(ideas, model)
-    ranked.sort(key=lambda x: x[1], reverse=True)
+    ranked = sorted(ranked_raw, key=lambda x: float(x.get("score", 0.5)), reverse=True)
 
     results = []
-    for idea, score in ranked[:top_n]:
-        narrative = _expand_story(idea, audience, text_model)
-        results.append(RankedStory(**idea.model_dump(), score=score, audience_mode=audience, narrative_text=narrative))
+    for item in ranked[:top_n]:
+        score = float(item.pop("score", 0.5))
+        idea = StoryIdea(**{k: v for k, v in item.items() if k in StoryIdea.model_fields})
+        expand_prompt = _EXPAND_PROMPT.format(
+            audience=audience, title=idea.title, hook=idea.hook,
+            context=idea.context, dispute=idea.dispute, solution=idea.solution
+        )
+        narrative = chat(expand_prompt, json_mode=False)
+        results.append(RankedStory(**idea.model_dump(), score=score,
+                                   audience_mode=audience, narrative_text=narrative))
     return results
