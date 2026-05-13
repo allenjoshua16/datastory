@@ -1,5 +1,6 @@
-"""Unified LLM client — supports Groq and Gemini with auto-retry on rate limits."""
+"""Unified LLM client — Groq + Gemini with aggressive retry and fallback."""
 from __future__ import annotations
+import json
 import logging
 import time
 from core.config import get_settings
@@ -9,46 +10,59 @@ logger = logging.getLogger(__name__)
 
 def _clean_json(text: str) -> str:
     text = text.strip()
-    if text.startswith("```"):
-        text = "\n".join(text.split("\n")[1:])
+    for fence in ["```json", "```JSON", "```"]:
+        if text.startswith(fence):
+            text = text[len(fence):]
     if text.endswith("```"):
-        text = "\n".join(text.split("\n")[:-1])
+        text = text[:-3]
     return text.strip()
 
 
-def chat(prompt: str, json_mode: bool = False, retries: int = 5, base_wait: int = 20) -> str:
+def chat(prompt: str, json_mode: bool = False, retries: int = 6, base_wait: int = 15) -> str:
     settings = get_settings()
-    provider = settings.ai_provider.lower()
+    providers = [settings.ai_provider.lower()]
+    # Auto-fallback to other provider
+    if "groq" in providers:
+        providers.append("gemini")
+    else:
+        providers.append("groq")
 
     last_error = None
-    for attempt in range(retries):
-        try:
-            if provider == "groq":
-                return _groq_chat(prompt, json_mode, settings)
-            else:
-                return _gemini_chat(prompt, json_mode, settings)
+    for provider in providers:
+        for attempt in range(retries):
+            try:
+                if provider == "groq" and settings.groq_api_key:
+                    return _groq_chat(prompt, json_mode, settings)
+                elif provider == "gemini" and settings.gemini_api_key:
+                    return _gemini_chat(prompt, json_mode, settings)
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                is_rate_limit = any(x in err_str for x in [
+                    "429", "rate", "quota", "too many", "exhausted",
+                    "ratelimit", "resource_exhausted", "tokens per"
+                ])
+                is_bad_model = any(x in err_str for x in [
+                    "decommissioned", "not found", "not supported", "invalid model"
+                ])
+                if is_bad_model:
+                    logger.error(f"Bad model for {provider}: {e}")
+                    break  # Try next provider
+                if is_rate_limit and attempt < retries - 1:
+                    wait = base_wait * (attempt + 1)
+                    logger.warning(f"[{provider}] Rate limit attempt {attempt+1}/{retries}, waiting {wait}s")
+                    time.sleep(wait)
+                    continue
+                if attempt < retries - 1:
+                    time.sleep(5)
+                    continue
+                break
+        else:
+            continue
+        if last_error and not any(x in str(last_error).lower() for x in ["decommissioned", "not found"]):
+            continue
 
-        except Exception as e:
-            last_error = e
-            err_str = str(e).lower()
-            is_rate_limit = (
-                "429" in str(e)
-                or "rate" in err_str
-                or "quota" in err_str
-                or "too many" in err_str
-                or "exhausted" in err_str
-                or "ratelimit" in err_str
-            )
-            if is_rate_limit and attempt < retries - 1:
-                wait = base_wait * (attempt + 1)
-                logger.warning(f"Rate limit hit (attempt {attempt+1}/{retries}), waiting {wait}s...")
-                time.sleep(wait)
-                continue
-
-            # Non-rate-limit error — raise immediately
-            raise
-
-    raise RuntimeError(f"All {retries} retry attempts exhausted. Last error: {last_error}")
+    raise RuntimeError(f"All LLM providers failed. Last: {last_error}")
 
 
 def _groq_chat(prompt: str, json_mode: bool, settings) -> str:
