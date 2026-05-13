@@ -1,4 +1,4 @@
-"""Orchestrator — runs all agents in sequence with detailed logging."""
+"""Orchestrator — runs all agents in sequence with pacing to avoid rate limits."""
 from __future__ import annotations
 import asyncio
 import logging
@@ -14,6 +14,7 @@ from agents import (
 
 logger = logging.getLogger(__name__)
 CHART_OUTPUT_DIR = "./chart_outputs"
+AGENT_PAUSE = 3  # seconds between LLM agent calls to avoid rate limits
 
 
 async def run_pipeline(job: PipelineJob, filepath: str, audience: AudienceMode = "executive"):
@@ -24,49 +25,56 @@ async def run_pipeline(job: PipelineJob, filepath: str, audience: AudienceMode =
         job_store.update_job(job.job_id, status=status, progress=progress, status_message=message)
 
     try:
-        _update("analyzing", 10, "Analyzing dataset structure and statistics…")
-        logger.info(f"Running data_analysis on {filepath}")
+        # Stage 1 — Data Analysis
+        _update("analyzing", 10, "Analyzing dataset…")
         meta = await data_analysis.run(filepath)
-        logger.info(f"data_analysis done: {meta.row_count} rows, domain={meta.inferred_domain}")
+        logger.info(f"Domain: {meta.inferred_domain}, rows: {meta.row_count}")
         job_store.update_job(job.job_id, metadata=meta)
+        await asyncio.sleep(AGENT_PAUSE)
 
-        _update("visualizing", 30, "Selecting meaningful chart types…")
-        logger.info("Running visualization_gen")
+        # Stage 2 — Visualization Generation
+        _update("visualizing", 28, "Selecting chart types…")
         chart_specs = await visualization_gen.run(meta)
-        logger.info(f"visualization_gen done: {len(chart_specs)} charts")
+        logger.info(f"Generated {len(chart_specs)} chart specs")
+        await asyncio.sleep(AGENT_PAUSE)
 
-        _update("executing", 45, "Generating and rendering charts…")
+        # Stage 3 — Chart Rendering (deterministic — no rate limit risk)
+        _update("executing", 40, "Rendering charts…")
         rendered_charts = []
         for i, spec in enumerate(chart_specs):
-            _update("executing", 45 + int((i / len(chart_specs)) * 20),
+            _update("executing", 40 + int((i / len(chart_specs)) * 20),
                     f"Rendering chart {i+1}/{len(chart_specs)}: {spec.title}")
-            logger.info(f"Running code_exec for chart: {spec.title}")
             rendered = await code_exec.run(spec, filepath, CHART_OUTPUT_DIR)
             rendered_charts.append(rendered)
         job_store.update_job(job.job_id, chart_specs=rendered_charts)
+        await asyncio.sleep(AGENT_PAUSE)
 
-        _update("generating", 70, "Crafting narrative ideas…")
-        logger.info("Running story_gen")
+        # Stage 4 — Story Generation
+        _update("generating", 65, "Crafting narrative ideas…")
         ideas = await story_gen.run(meta, rendered_charts)
-        logger.info(f"story_gen done: {len(ideas)} ideas")
+        logger.info(f"Generated {len(ideas)} story ideas")
+        await asyncio.sleep(AGENT_PAUSE)
 
-        _update("generating", 80, f"Writing {audience} narratives…")
-        logger.info("Running story_exec")
+        # Stage 5 — Story Execution
+        _update("generating", 78, f"Writing {audience} narratives…")
         stories = await story_exec.run(ideas, audience=audience)
-        logger.info(f"story_exec done: {len(stories)} stories")
+        logger.info(f"Wrote {len(stories)} stories")
         job_store.update_job(job.job_id, stories=stories)
+        await asyncio.sleep(AGENT_PAUSE)
 
-        _update("reporting", 92, "Assembling final report…")
-        logger.info("Running report_gen")
+        # Stage 6 — Report Assembly
+        _update("reporting", 92, "Assembling report…")
         report_html = report_gen.run(meta, rendered_charts, stories)
         job_store.update_job(job.job_id, report_html=report_html)
 
         _update("done", 100, "Report ready.")
-        logger.info(f"Pipeline complete for job {job.job_id}")
+        logger.info(f"Pipeline complete: {job.job_id}")
 
     except Exception as exc:
         tb = traceback.format_exc()
-        logger.error(f"Pipeline failed for job {job.job_id}:\n{tb}")
-        job_store.update_job(job.job_id, status="error", progress=0,
-                             status_message="Pipeline failed.", error=str(exc))
+        logger.error(f"Pipeline failed [{job.job_id}]:\n{tb}")
+        job_store.update_job(
+            job.job_id, status="error", progress=0,
+            status_message="Pipeline failed.", error=str(exc),
+        )
         raise
