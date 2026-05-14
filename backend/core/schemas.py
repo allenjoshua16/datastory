@@ -1,12 +1,8 @@
-"""Shared Pydantic schemas used across all agents and API routes."""
+"""Shared Pydantic schemas."""
 from __future__ import annotations
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
-
-# ---------------------------------------------------------------------------
-# Dataset metadata (output of Data Analysis Agent)
-# ---------------------------------------------------------------------------
 
 class ColumnStat(BaseModel):
     name: str
@@ -15,7 +11,6 @@ class ColumnStat(BaseModel):
     null_count: int
     unique_count: int
     sample_values: list[Any] = Field(default_factory=list)
-    # numeric only
     mean: float | None = None
     std: float | None = None
     min: float | None = None
@@ -29,17 +24,10 @@ class DatasetMetadata(BaseModel):
     columns: list[ColumnStat]
     correlations: dict[str, dict[str, float]] = Field(default_factory=dict)
     anomalies: list[str] = Field(default_factory=list)
-    inferred_domain: str = "general"  # e.g. "sales", "finance", "healthcare"
+    inferred_domain: str = "general"
 
 
-# ---------------------------------------------------------------------------
-# Visualization spec (output of Visualization Generation Agent)
-# ---------------------------------------------------------------------------
-
-ChartType = Literal[
-    "bar", "line", "scatter", "pie", "histogram",
-    "heatmap", "box", "area", "funnel", "treemap"
-]
+ChartType = Literal["bar","line","scatter","pie","histogram","heatmap","box","area","funnel","treemap"]
 
 
 class ChartSpec(BaseModel):
@@ -51,23 +39,19 @@ class ChartSpec(BaseModel):
     color_column: str | None = None
     rationale: str
     available_columns: list[str] = Field(default_factory=list)
-    plotly_code: str = ""   # filled by Code Generation Agent
-    rendered_html: str = "" # filled by Code Execution Agent
+    plotly_code: str = ""
+    rendered_html: str = ""
 
-
-# ---------------------------------------------------------------------------
-# Story (output of Story Generation / Execution Agents)
-# ---------------------------------------------------------------------------
 
 AudienceMode = Literal["executive", "analyst", "investor", "general"]
 
 
 class StoryIdea(BaseModel):
     title: str
-    hook: str          # one-sentence grabber
+    hook: str
     context: str
-    dispute: str       # the surprising / unexpected finding
-    solution: str      # actionable recommendation
+    dispute: str
+    solution: str
     relevant_chart_ids: list[str] = Field(default_factory=list)
 
 
@@ -77,13 +61,21 @@ class RankedStory(StoryIdea):
     narrative_text: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Pipeline job — tracks state across agents
-# ---------------------------------------------------------------------------
+class PreprocessingReport(BaseModel):
+    row_count_before: int = 0
+    row_count_after: int = 0
+    column_count_before: int = 0
+    column_count_after: int = 0
+    rows_removed: int = 0
+    columns_removed: int = 0
+    transformations: list[str] = Field(default_factory=list)
+    column_stats_after: list[dict] = Field(default_factory=list)
+    inferred_types: dict[str, str] = Field(default_factory=dict)
+
 
 PipelineStatus = Literal[
-    "queued", "ingesting", "analyzing", "visualizing",
-    "generating", "executing", "reporting", "done", "error"
+    "queued","preprocessing","ingesting","analyzing","visualizing",
+    "executing","generating","reporting","done","error"
 ]
 
 
@@ -91,18 +83,17 @@ class PipelineJob(BaseModel):
     job_id: str
     filename: str
     status: PipelineStatus = "queued"
-    progress: int = 0          # 0-100
+    progress: int = 0
     status_message: str = ""
+    preprocess: bool = False
+    clean_filepath: str | None = None
+    preprocessing_report: PreprocessingReport | None = None
     metadata: DatasetMetadata | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)
     stories: list[RankedStory] = Field(default_factory=list)
     report_html: str = ""
     error: str | None = None
 
-
-# ---------------------------------------------------------------------------
-# API request / response wrappers
-# ---------------------------------------------------------------------------
 
 class UploadResponse(BaseModel):
     job_id: str
@@ -124,3 +115,4 @@ class JobResultResponse(BaseModel):
     chart_specs: list[ChartSpec]
     stories: list[RankedStory]
     report_html: str
+    preprocessing_report: PreprocessingReport | None = None

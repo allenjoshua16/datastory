@@ -5,45 +5,109 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>DataStory Report</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Georgia', serif; background: #0f0f11; color: #e8e6df; line-height: 1.7; }
-  .header { padding: 3rem 4rem 2rem; border-bottom: 1px solid #2a2a2e; }
-  .header h1 { font-size: 2rem; font-weight: 400; letter-spacing: -0.02em; color: #f5f3ec; }
-  .header .meta { margin-top: .5rem; font-size: .85rem; color: #6b6964; font-family: 'Courier New', monospace; }
-  .section { padding: 2.5rem 4rem; border-bottom: 1px solid #1e1e21; }
-  .section h2 { font-size: 1.1rem; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; color: #7c6f5e; margin-bottom: 1.5rem; }
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
-  .stat-card { background: #18181c; border: 1px solid #2a2a2e; border-radius: 8px; padding: 1.2rem; }
-  .stat-card .val { font-size: 1.6rem; font-weight: 600; color: #c9a96e; font-family: 'Courier New', monospace; }
-  .stat-card .label { font-size: .75rem; color: #5a5955; margin-top: .25rem; text-transform: uppercase; letter-spacing: .06em; }
-  .anomaly-list { list-style: none; }
-  .anomaly-list li { padding: .4rem 0; font-size: .875rem; color: #c17b4e; }
-  .anomaly-list li::before { content: '⚠ '; }
-  .story { background: #14141a; border-left: 3px solid #c9a96e; border-radius: 0 8px 8px 0; padding: 1.5rem 2rem; margin-bottom: 1.5rem; }
-  .story h3 { font-size: 1.25rem; font-weight: 400; color: #f0ebe0; margin-bottom: .5rem; }
-  .story .hook { font-style: italic; color: #9a9590; margin-bottom: 1rem; font-size: .95rem; }
-  .story .narrative { font-size: .9rem; color: #ccc9c0; line-height: 1.8; }
-  .story .score { font-size: .75rem; color: #5a5955; margin-top: .75rem; font-family: monospace; }
-  .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(580px, 1fr)); gap: 1.5rem; }
-  .chart-wrap { background: #fff; border-radius: 8px; overflow: hidden; }
-  .chart-meta { padding: .75rem 1rem; background: #18181c; }
-  .chart-meta .chart-title { font-size: .875rem; color: #c9a96e; }
-  .chart-meta .rationale { font-size: .75rem; color: #5a5955; margin-top: .2rem; }
-  .footer { padding: 2rem 4rem; font-size: .75rem; color: #3d3d40; font-family: monospace; }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Georgia',serif;background:#0f0f11;color:#e8e6df;line-height:1.7}
+  .header{padding:3rem 4rem 2rem;border-bottom:1px solid #2a2a2e}
+  .header h1{font-size:2rem;font-weight:400;letter-spacing:-0.02em;color:#f5f3ec}
+  .header .meta{margin-top:.5rem;font-size:.85rem;color:#6b6964;font-family:'Courier New',monospace}
+  .section{padding:2.5rem 4rem;border-bottom:1px solid #1e1e21}
+  .section h2{font-size:1.1rem;font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:#7c6f5e;margin-bottom:1.5rem}
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem}
+  .stat-card{background:#18181c;border:1px solid #2a2a2e;border-radius:8px;padding:1.2rem}
+  .stat-card .val{font-size:1.6rem;font-weight:600;color:#c9a96e;font-family:'Courier New',monospace}
+  .stat-card .label{font-size:.75rem;color:#5a5955;margin-top:.25rem;text-transform:uppercase;letter-spacing:.06em}
+  .story{background:#14141a;border-left:3px solid #c9a96e;border-radius:0 8px 8px 0;padding:1.5rem 2rem;margin-bottom:1.5rem}
+  .story h3{font-size:1.25rem;font-weight:400;color:#f0ebe0;margin-bottom:.5rem}
+  .story .hook{font-style:italic;color:#9a9590;margin-bottom:1rem;font-size:.95rem}
+  .story .narrative{font-size:.9rem;color:#ccc9c0;line-height:1.8}
+  .story .score{font-size:.75rem;color:#5a5955;margin-top:.75rem;font-family:monospace}
+  .chart-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(560px,1fr));gap:1.5rem}
+  .chart-wrap{background:#fff;border-radius:8px;overflow:hidden}
+  .chart-meta{padding:.75rem 1rem;background:#18181c}
+  .chart-meta .chart-title{font-size:.875rem;color:#c9a96e}
+  .chart-meta .rationale{font-size:.75rem;color:#5a5955;margin-top:.2rem}
+  /* Preprocessing */
+  .pp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
+  .pp-card{background:#18181c;border:1px solid #2a2a2e;border-radius:8px;padding:1rem}
+  .pp-card .val{font-size:1.4rem;font-weight:600;font-family:'Courier New',monospace}
+  .pp-card.green .val{color:#6db86d}
+  .pp-card.amber .val{color:#c9a96e}
+  .pp-card.red   .val{color:#c17b4e}
+  .pp-card .label{font-size:.7rem;color:#5a5955;margin-top:.2rem;text-transform:uppercase}
+  .transformation-list{list-style:none;space-y:4px}
+  .transformation-list li{padding:.35rem .6rem;font-size:.82rem;color:#a0a09a;font-family:'Courier New',monospace;background:#18181c;border-radius:4px;margin-bottom:.4rem}
+  .transformation-list li::before{content:'✓ ';color:#6db86d}
+  .anomaly-list{list-style:none}
+  .anomaly-list li{padding:.4rem 0;font-size:.875rem;color:#c17b4e}
+  .anomaly-list li::before{content:'⚠ '}
+  .footer{padding:2rem 4rem;font-size:.75rem;color:#3d3d40;font-family:monospace}
+  .badge{display:inline-block;padding:.2rem .6rem;border-radius:4px;font-size:.7rem;font-family:monospace;background:#1e2a1e;color:#6db86d;border:1px solid #2a3a2a;margin-right:.4rem}
+  .badge.amber{background:#2a251a;color:#c9a96e;border-color:#3a331a}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>Data Story Report</h1>
+  <h1>DataStory Report</h1>
   <div class="meta">
     {{ meta.row_count | int }} rows &nbsp;·&nbsp;
     {{ meta.column_count | int }} columns &nbsp;·&nbsp;
     domain: {{ meta.inferred_domain }} &nbsp;·&nbsp;
     {{ stories | length }} stories &nbsp;·&nbsp;
     {{ charts | length }} charts
+    {% if preprocessing_report %}&nbsp;·&nbsp;<span style="color:#6db86d">preprocessed</span>{% endif %}
   </div>
 </div>
+
+{% if preprocessing_report %}
+<div class="section">
+  <h2>Preprocessing Summary</h2>
+  <div class="pp-grid">
+    <div class="pp-card amber">
+      <div class="val">{{ preprocessing_report.row_count_before }}</div>
+      <div class="label">Rows (before)</div>
+    </div>
+    <div class="pp-card green">
+      <div class="val">{{ preprocessing_report.row_count_after }}</div>
+      <div class="label">Rows (after)</div>
+    </div>
+    <div class="pp-card {% if preprocessing_report.rows_removed > 0 %}red{% else %}green{% endif %}">
+      <div class="val">{{ preprocessing_report.rows_removed }}</div>
+      <div class="label">Rows removed</div>
+    </div>
+    <div class="pp-card amber">
+      <div class="val">{{ preprocessing_report.column_count_before }}</div>
+      <div class="label">Columns (before)</div>
+    </div>
+    <div class="pp-card green">
+      <div class="val">{{ preprocessing_report.column_count_after }}</div>
+      <div class="label">Columns (after)</div>
+    </div>
+    <div class="pp-card">
+      <div class="val" style="color:#c9a96e">{{ preprocessing_report.transformations | length }}</div>
+      <div class="label">Transformations</div>
+    </div>
+  </div>
+  {% if preprocessing_report.transformations %}
+  <ul class="transformation-list">
+    {% for t in preprocessing_report.transformations %}<li>{{ t }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if preprocessing_report.inferred_types %}
+  <div style="margin-top:1rem">
+    {% for col, dtype in preprocessing_report.inferred_types.items() %}
+    <span class="badge {% if dtype in ['datetime','numeric'] %}amber{% endif %}">{{ col }}: {{ dtype }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="section" style="padding:1rem 4rem">
+  <p style="font-size:.8rem;color:#5a5955;font-family:monospace">
+    ℹ Dataset analyzed as uploaded — no preprocessing applied.
+  </p>
+</div>
+{% endif %}
 
 {% if stories %}
 <div class="section">
@@ -99,7 +163,6 @@
   </div>
 </div>
 
-<div class="footer">Generated by DataStory · Powered by GPT-4 + Plotly</div>
-
+<div class="footer">Generated by DataStory · AI-augmented data storytelling</div>
 </body>
 </html>
