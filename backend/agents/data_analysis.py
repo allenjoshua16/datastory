@@ -1,4 +1,4 @@
-"""Data Analysis Agent — supports CSV, Excel, JSON, TSV, Parquet, DOCX."""
+"""Data Analysis Agent — supports CSV and Excel only."""
 from __future__ import annotations
 import logging
 import pandas as pd
@@ -9,58 +9,43 @@ logger = logging.getLogger(__name__)
 
 
 def _load_dataframe(filepath: str) -> pd.DataFrame:
+    """Load CSV or Excel file with robust encoding and delimiter detection."""
     fp = filepath.lower()
-    try:
-        if fp.endswith((".xlsx", ".xls", ".xlsm", ".xlsb")):
-            return pd.read_excel(filepath)
-        elif fp.endswith(".json"):
+
+    if fp.endswith((".xlsx", ".xls", ".xlsm", ".xlsb")):
+        try:
+            df = pd.read_excel(filepath)
+            logger.info(f"Loaded Excel: {df.shape}")
+            return df
+        except Exception as e:
+            raise RuntimeError(f"Could not read Excel file: {e}")
+
+    # CSV — try multiple encodings and delimiters
+    encodings = ["utf-8-sig", "utf-8", "latin-1", "cp1252", "iso-8859-1"]
+    delimiters = [",", ";", "\t", "|"]
+
+    for enc in encodings:
+        for delim in delimiters:
             try:
-                return pd.read_json(filepath)
+                df = pd.read_csv(
+                    filepath,
+                    encoding=enc,
+                    sep=delim,
+                    encoding_errors="replace",
+                    low_memory=False,
+                    on_bad_lines="skip",
+                )
+                # Validate — must have at least 2 columns or 1 row
+                if df.shape[1] >= 1 and df.shape[0] >= 1:
+                    logger.info(f"Loaded CSV (enc={enc}, sep='{delim}'): {df.shape}")
+                    return df
             except Exception:
-                import json
-                with open(filepath) as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    return pd.DataFrame(data)
-                elif isinstance(data, dict):
-                    return pd.DataFrame([data])
-                return pd.DataFrame()
-        elif fp.endswith(".tsv"):
-            return pd.read_csv(filepath, sep="\t", encoding_errors="replace")
-        elif fp.endswith(".parquet"):
-            return pd.read_parquet(filepath)
-        elif fp.endswith(".docx"):
-            return _read_docx(filepath)
-        else:
-            # Try CSV with multiple encodings
-            for enc in ["utf-8", "latin-1", "cp1252", "iso-8859-1"]:
-                try:
-                    return pd.read_csv(filepath, encoding=enc, encoding_errors="replace")
-                except Exception:
-                    continue
-            return pd.read_csv(filepath, encoding_errors="replace")
-    except Exception as e:
-        logger.error(f"Failed to load {filepath}: {e}")
-        raise
-
-
-def _read_docx(filepath: str) -> pd.DataFrame:
-    try:
-        from docx import Document
-        doc = Document(filepath)
-        tables = []
-        for table in doc.tables:
-            if len(table.rows) < 2:
                 continue
-            headers = [cell.text.strip() for cell in table.rows[0].cells]
-            rows = [[cell.text.strip() for cell in row.cells] for row in table.rows[1:]]
-            tables.append(pd.DataFrame(rows, columns=headers))
-        if tables:
-            return pd.concat(tables, ignore_index=True)
-        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-        return pd.DataFrame({"text": paragraphs})
-    except ImportError:
-        raise RuntimeError("python-docx not installed.")
+
+    # Last resort — read as raw text
+    raise RuntimeError(
+        "Could not parse CSV file. Please ensure it is a valid comma-separated or Excel file."
+    )
 
 
 def _compute_column_stats(df: pd.DataFrame) -> list[ColumnStat]:
@@ -69,7 +54,6 @@ def _compute_column_stats(df: pd.DataFrame) -> list[ColumnStat]:
         series = df[col]
         try:
             sample = series.dropna().head(5).tolist()
-            # Convert non-serializable types
             sample = [str(v) if not isinstance(v, (int, float, str, bool)) else v for v in sample]
             stat = ColumnStat(
                 name=str(col),
@@ -87,7 +71,7 @@ def _compute_column_stats(df: pd.DataFrame) -> list[ColumnStat]:
                 stat.median = round(float(series.median()), 4)
             stats.append(stat)
         except Exception as e:
-            logger.warning(f"Could not compute stats for column '{col}': {e}")
+            logger.warning(f"Stats failed for '{col}': {e}")
     return stats
 
 
@@ -97,8 +81,10 @@ def _compute_correlations(df: pd.DataFrame) -> dict[str, dict[str, float]]:
         if num_df.shape[1] < 2:
             return {}
         corr = num_df.corr().round(3)
-        return {str(col): {str(k): float(v) for k, v in corr[col].items()}
-                for col in corr.columns}
+        return {
+            str(col): {str(k): float(v) for k, v in corr[col].items()}
+            for col in corr.columns
+        }
     except Exception as e:
         logger.warning(f"Correlation failed: {e}")
         return {}
@@ -115,11 +101,11 @@ def _detect_anomalies(df: pd.DataFrame) -> list[str]:
             iqr = q3 - q1
             if iqr == 0:
                 continue
-            outliers = series[(series < q1 - 3 * iqr) | (series > q3 + 3 * iqr)]
-            if not outliers.empty:
-                anomalies.append(f"Column '{col}' has {len(outliers)} extreme outlier(s).")
-        missing_pct = (df.isna().sum() / len(df) * 100).round(1)
-        for col, pct in missing_pct.items():
+            outliers = ((df[col] < q1 - 3 * iqr) | (df[col] > q3 + 3 * iqr)).sum()
+            if outliers > 0:
+                anomalies.append(f"Column '{col}' has {outliers} extreme outlier(s).")
+        for col in df.columns:
+            pct = df[col].isna().mean() * 100
             if pct > 20:
                 anomalies.append(f"Column '{col}' is {pct:.0f}% missing.")
     except Exception as e:
@@ -129,36 +115,42 @@ def _detect_anomalies(df: pd.DataFrame) -> list[str]:
 
 async def run(filepath: str) -> DatasetMetadata:
     df = _load_dataframe(filepath)
+
+    # Clean column names
     df.columns = [str(c).strip() for c in df.columns]
-    # Drop completely empty columns
-    df = df.dropna(axis=1, how="all")
+    df = df.dropna(axis=1, how="all")  # drop fully empty columns
+    df = df.loc[:, ~df.columns.duplicated()]  # drop duplicate column names
+
     df_sample = df.head(5000)
 
     columns      = _compute_column_stats(df_sample)
     correlations = _compute_correlations(df_sample)
     anomalies    = _detect_anomalies(df_sample)
 
-    col_names = [c.name for c in columns][:20]
     domain = "general"
     try:
+        col_names = [c.name for c in columns][:20]
         prompt = (
             f"Given these dataset column names: {col_names}, "
             "in one word, what business domain is this? "
             "Examples: sales, finance, healthcare, marketing, logistics, hr, ecommerce. "
-            "Reply with only the single domain word."
+            "Reply with only the single domain word, nothing else."
         )
-        domain = chat(prompt).strip().lower().split()[0]
-        # Sanitize — only allow known domains
-        known = {"sales","finance","healthcare","marketing","logistics","hr","ecommerce",
-                 "general","retail","education","operations","supply","inventory"}
-        if domain not in known:
-            domain = "general"
+        result = chat(prompt).strip().lower().split()[0]
+        known = {
+            "sales","finance","healthcare","marketing","logistics",
+            "hr","ecommerce","retail","education","operations","general"
+        }
+        domain = result if result in known else "general"
     except Exception as e:
         logger.warning(f"Domain inference failed: {e}")
 
-    logger.info(f"Analysis: {len(df)} rows, {len(df.columns)} cols, domain={domain}")
+    logger.info(f"Analysis done: {len(df)} rows, {len(df.columns)} cols, domain={domain}")
     return DatasetMetadata(
-        row_count=len(df), column_count=len(df.columns),
-        columns=columns, correlations=correlations,
-        anomalies=anomalies, inferred_domain=domain,
+        row_count=len(df),
+        column_count=len(df.columns),
+        columns=columns,
+        correlations=correlations,
+        anomalies=anomalies,
+        inferred_domain=domain,
     )

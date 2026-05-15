@@ -7,7 +7,7 @@ const AUDIENCE_OPTIONS = [
   { value: 'investor',  label: 'Investor' },
   { value: 'general',   label: 'General' },
 ]
-const ACCEPTED = ['.csv','.xlsx','.xls','.xlsm','.json','.tsv','.parquet','.docx']
+const ACCEPTED = ['.csv', '.xlsx', '.xls', '.xlsm']
 const MAX_MB = 200
 
 export default function UploadZone({ onJobCreated }) {
@@ -80,7 +80,7 @@ export default function UploadZone({ onJobCreated }) {
           <>
             <div className="mb-4 text-3xl">📂</div>
             <p className="text-gold font-serif text-lg">Drop your dataset here</p>
-            <p className="text-muted text-sm mt-3 font-mono">CSV · Excel · JSON · TSV · Parquet · DOCX</p>
+            <p className="text-muted text-sm mt-3 font-mono">CSV · Excel (.xlsx, .xls)</p>
             <p className="text-muted text-xs mt-1 font-mono">up to {MAX_MB} MB</p>
           </>
         )}
@@ -110,11 +110,8 @@ export default function UploadZone({ onJobCreated }) {
       {/* Formats grid */}
       <div className="mt-10 grid grid-cols-3 gap-3 max-w-lg text-center">
         {[
-          {icon:'📊', label:'CSV / TSV',   desc:'Comma or tab separated'},
+          {icon:'📊', label:'CSV',          desc:'Comma-separated values'},
           {icon:'📗', label:'Excel',        desc:'.xlsx, .xls, .xlsm'},
-          {icon:'📄', label:'JSON',         desc:'Array or object format'},
-          {icon:'📦', label:'Parquet',      desc:'Columnar data files'},
-          {icon:'📝', label:'Word',         desc:'.docx with tables'},
           {icon:'🔒', label:'Private',      desc:'Session only, not stored'},
         ].map(f => (
           <div key={f.label} className="bg-ink-800 border border-ink-600 rounded-lg p-3">
